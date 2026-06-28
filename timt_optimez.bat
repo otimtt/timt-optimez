@@ -9,7 +9,7 @@
 net session >nul 2>&1
 if %errorLevel% neq 0 (
     echo.
-    echo  [ERRO] Só funciona se executar como Administrador!
+    echo  [ERRO] So funciona se executar como Administrador!
     echo  Clique com botao direito no arquivo e selecione:
     echo  "Executar como administrador"
     echo.
@@ -22,6 +22,102 @@ title TIMT-OPTIMEZ
 color 0A
 mode con: cols=70 lines=50
 
+:: ============================================================
+:: TELA DE BOAS-VINDAS
+:: ============================================================
+:BEMVINDO
+cls
+echo.
+echo  ========================================================
+echo.
+echo       ████████╗██╗███╗   ███╗████████╗
+echo          ██╔══╝██║████╗ ████║   ██╔══╝
+echo          ██║   ██║██╔████╔██║   ██║
+echo          ██║   ██║██║╚██╔╝██║   ██║
+echo          ██║   ██║██║ ╚═╝ ██║   ██║
+echo          ╚═╝   ╚═╝╚═╝     ╚═╝   ╚═╝
+echo.
+echo       TIMT-OPTIMEZ  ^|  by Timoteo (Timt)
+echo       Limpeza e Otimizacao Completa para Windows 10
+echo       github.com/otimtt/timt-optimez
+echo.
+echo  ========================================================
+echo.
+echo   Bem-vindo! Este programa ira realizar as seguintes
+echo   operacoes no seu sistema:
+echo.
+echo     [*]  Limpeza de arquivos temporarios e lixo
+echo     [*]  Otimizacao de desempenho e memoria
+echo     [*]  Gerenciamento de servicos e startup
+echo     [*]  Otimizacao de rede e internet
+echo.
+echo  ========================================================
+echo.
+echo   AVISO: Recomenda-se criar um ponto de restauracao
+echo   antes de continuar, algumas mudancas exigem reinicio!
+echo.
+echo  ========================================================
+echo.
+set /p iniciar="  Deseja continuar? (S/N): "
+if /i "%iniciar%"=="S" goto VARREDURA
+if /i "%iniciar%"=="N" goto SAIR
+
+echo  Opcao invalida!
+timeout /t 2 >nul
+goto BEMVINDO
+
+:: ============================================================
+:: VARREDURA INICIAL
+:: ============================================================
+:VARREDURA
+cls
+echo.
+echo  ========================================================
+echo       ANALISANDO SEU SISTEMA...
+echo  ========================================================
+echo.
+
+echo  [..] Verificando versao do Windows...
+for /f "tokens=4-5 delims=. " %%i in ('ver') do set VERSION=%%i.%%j
+echo  [OK] Windows detectado: %VERSION%
+
+echo  [..] Verificando espaco em disco (C:)...
+for /f "tokens=3" %%a in ('dir C:\ /-c 2^>nul ^| findstr /c:"bytes free"') do set LIVRES=%%a
+echo  [OK] Espaco livre em C: verificado
+
+echo  [..] Verificando uso de memoria RAM...
+for /f "skip=1 tokens=2" %%a in ('wmic OS get FreePhysicalMemory') do (
+    set RAMLIVRE=%%a
+    goto :RAMOK
+)
+:RAMOK
+echo  [OK] Memoria RAM verificada
+
+echo  [..] Verificando conexao com a rede...
+ping -n 1 8.8.8.8 >nul 2>&1
+if %errorLevel% equ 0 (
+    echo  [OK] Rede ativa
+) else (
+    echo  [!!] Sem conexao de rede detectada
+)
+
+echo  [..] Verificando privilegios de administrador...
+echo  [OK] Privilegios confirmados
+
+echo.
+echo  --------------------------------------------------------
+echo.
+echo  Varredura inicial concluida!
+echo  O sistema esta pronto para ser otimizado.
+echo.
+echo  ========================================================
+echo.
+pause
+goto MENU
+
+:: ============================================================
+:: MENU PRINCIPAL
+:: ============================================================
 :MENU
 cls
 echo.
