@@ -22,6 +22,9 @@ title TIMT-OPTIMEZ
 color 0A
 mode con: cols=70 lines=50
 
+:: Inicializa flag de restauracao
+set "RESTAURACAO_CRIADA=0"
+
 :: ============================================================
 :: TELA DE BOAS-VINDAS
 :: ============================================================
@@ -59,12 +62,42 @@ echo.
 echo  ========================================================
 echo.
 set /p iniciar="  Deseja continuar? (S/N): "
-if /i "%iniciar%"=="S" goto VARREDURA
+if /i "%iniciar%"=="S" goto BACKUP_INICIO
 if /i "%iniciar%"=="N" goto SAIR
 
 echo  Opcao invalida!
 timeout /t 2 >nul
 goto BEMVINDO
+
+:: ============================================================
+:: CRIA PONTO DE RESTAURACAO NO INÍCIO
+:: ============================================================
+:BACKUP_INICIO
+cls
+echo.
+echo  ========================================================
+echo       CRIANDO PONTO DE RESTAURACAO...
+echo  ========================================================
+echo.
+echo  Um ponto de restauracao sera criado para garantir que
+echo  voce possa desfazer as alteracoes, se necessario.
+echo.
+echo  Aguarde...
+echo.
+
+powershell -Command "Checkpoint-Computer -Description 'TIMT-OPTIMEZ - antes da otimizacao' -RestorePointType 'MODIFY_SETTINGS'" >nul 2>&1
+if %errorLevel% equ 0 (
+    echo  [OK] Ponto de restauracao criado com sucesso!
+    set "RESTAURACAO_CRIADA=1"
+) else (
+    echo  [!!] Falha ao criar ponto de restauracao. Verifique se a
+    echo       Protecao do Sistema esta ativada para o disco C:.
+    echo       As otimizacoes prosseguirao sem backup.
+)
+echo.
+echo  ========================================================
+pause
+goto VARREDURA
 
 :: ============================================================
 :: VARREDURA INICIAL
@@ -169,17 +202,57 @@ call :REDE_FUNC
 
 echo.
 echo  ========================================================
-echo   [OK] OTIMIZACAO COMPLETA FINALIZADA COM SUCESSO!
+echo   [OK] OTIMIZACAO COMPLETA FINALIZADA!
 echo  ========================================================
 echo.
-echo  Recomendamos REINICIAR o computador agora.
+
+if "%RESTAURACAO_CRIADA%"=="1" (
+    echo   *** VOCE PODE DESFAZER TUDO ***
+    echo.
+    echo   Foi criado um ponto de restauracao antes das alteracoes.
+    echo   Se o sistema apresentar problemas, voce pode reverte-lo
+    echo   para exatamente como estava.
+    echo.
+    echo  ========================================================
+    echo   [R] RESTAURAR sistema para antes das otimizacoes
+    echo   [S] SAIR sem restaurar (recomendado reiniciar)
+    echo  ========================================================
+    echo.
+    choice /c RS /n /m "  Escolha uma opcao: "
+    if errorlevel 2 goto FINAL_SAIR
+    if errorlevel 1 goto RESTAURAR
+) else (
+    echo   Nao foi possivel criar ponto de restauracao.
+    echo   Deseja reiniciar o computador para aplicar as mudancas?
+    echo.
+    choice /c SN /n /m "  Reiniciar agora? (S/N): "
+    if errorlevel 2 goto MENU
+    if errorlevel 1 goto REINICIAR
+)
+
+:RESTAURAR
 echo.
-set /p reiniciar="  Deseja reiniciar agora? (S/N): "
-if /i "%reiniciar%"=="S" shutdown /r /t 10 /c "Reiniciando apos otimizacao..."
-goto MENU
+echo  Abrindo Restauracao do Sistema...
+echo  Selecione o ponto criado "TIMT-OPTIMEZ - antes da otimizacao"
+echo  e siga as instrucoes para reverter as alteracoes.
+echo  O sistema sera reiniciado automaticamente.
+echo.
+start /wait rstrui.exe /restore
+goto SAIR
+
+:FINAL_SAIR
+echo.
+echo  Recomenda-se reiniciar o sistema para aplicar as mudancas.
+choice /c SN /n /m "  Deseja reiniciar agora? (S/N): "
+if errorlevel 2 goto MENU
+if errorlevel 1 goto REINICIAR
+
+:REINICIAR
+shutdown /r /t 10 /c "TIMT-OPTIMEZ: Reiniciando para concluir otimizacoes..."
+goto SAIR
 
 :: ============================================================
-:: LIMPEZA DE ARQUIVOS
+:: LIMPEZA DE ARQUIVOS (individual)
 :: ============================================================
 :LIMPEZA
 cls
@@ -249,9 +322,16 @@ echo  [..] Executando limpeza nativa do Windows (cleanmgr)...
 cleanmgr /sagerun:1 >nul 2>&1
 echo  [OK] Disk Cleanup
 
+:: CORRIGIDO: vssadmin agora verifica se ha shadows antes de tentar deletar
 echo  [..] Esvaziando shadow copies antigas (mantem ultima)...
-vssadmin delete shadows /for=c: /oldest /quiet >nul 2>&1
-echo  [OK] Shadow copies
+for /f "tokens=*" %%s in ('vssadmin list shadows /for=c: 2^>nul ^| findstr /i "shadow copy ID"') do set VSS_EXISTE=1
+if defined VSS_EXISTE (
+    vssadmin delete shadows /for=c: /oldest /quiet >nul 2>&1
+    echo  [OK] Shadow copies antigas removidas
+) else (
+    echo  [--] Nenhuma shadow copy encontrada, nada a remover
+)
+set VSS_EXISTE=
 
 echo.
 echo  [OK] === Limpeza de arquivos concluida ===
@@ -259,7 +339,7 @@ echo.
 goto :EOF
 
 :: ============================================================
-:: OTIMIZACAO DO SISTEMA
+:: OTIMIZACAO DO SISTEMA (individual)
 :: ============================================================
 :OTIMIZACAO
 cls
@@ -293,10 +373,12 @@ echo  [..] Desativando hibernacao (libera espaco em disco)...
 powercfg /hibernate off >nul 2>&1
 echo  [OK] Hibernacao desativada
 
+:: CORRIGIDO: removidos ClearPageFileAtShutdown e LargeSystemCache que nao
+:: tinham efeito real no Windows 10 desktop. Substituido por ajuste do
+:: PagingFiles para gerenciamento automatico (comportamento padrao e ideal).
 echo  [..] Otimizando gerenciamento de memoria...
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" /v ClearPageFileAtShutdown /t REG_DWORD /d 0 /f >nul 2>&1
-reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" /v LargeSystemCache /t REG_DWORD /d 0 /f >nul 2>&1
-echo  [OK] Gerenciamento de memoria
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Memory Management" /v PagingFiles /t REG_MULTI_SZ /d "?:\pagefile.sys 0 0" /f >nul 2>&1
+echo  [OK] Gerenciamento de memoria (pagefile automatico)
 
 echo  [..] Desativando Cortana (melhora RAM e CPU)...
 reg add "HKLM\SOFTWARE\Policies\Microsoft\Windows\Windows Search" /v AllowCortana /t REG_DWORD /d 0 /f >nul 2>&1
@@ -308,10 +390,14 @@ sc config DiagTrack start= disabled >nul 2>&1
 sc stop DiagTrack >nul 2>&1
 echo  [OK] Telemetria
 
-echo  [..] Desativando indexacao de busca (menos uso de disco)...
+:: CORRIGIDO: WSearch desativado agora exibe aviso claro ao usuario, pois
+:: desabilitar quebra a busca do menu Iniciar e do Explorer.
+echo  [..] Desativando indexacao de busca (WSearch)...
+echo  [!!] AVISO: Isso desativa a busca do menu Iniciar e do Explorer.
+echo       Se precisar da busca, reative com: sc config WSearch start= auto
 sc config WSearch start= disabled >nul 2>&1
 sc stop WSearch >nul 2>&1
-echo  [OK] Indexacao de busca
+echo  [OK] Indexacao de busca desativada
 
 echo  [..] Otimizando tempo de resposta do menu Iniciar...
 reg add "HKCU\Control Panel\Desktop" /v MenuShowDelay /t REG_SZ /d 0 /f >nul 2>&1
@@ -322,16 +408,29 @@ reg add "HKCU\Control Panel\Desktop\WindowMetrics" /v MinAnimate /t REG_SZ /d 0 
 echo  [OK] Animacoes de janela
 
 echo  [..] Verificando integridade dos arquivos do sistema (SFC)...
+echo  [..] Isso pode demorar varios minutos, aguarde...
 sfc /scannow >nul 2>&1
 echo  [OK] SFC concluido
 
 echo  [..] Verificando e reparando imagem do Windows (DISM)...
+echo  [..] Isso pode demorar varios minutos, aguarde...
 DISM /Online /Cleanup-Image /RestoreHealth >nul 2>&1
 echo  [OK] DISM concluido
 
-echo  [..] Otimizando disco (desfragmentacao / TRIM para SSD)...
-defrag C: /U /V >nul 2>&1
-echo  [OK] Otimizacao de disco
+:: CORRIGIDO: defrag agora detecta se o disco e SSD ou HDD e age de forma
+:: adequada: TRIM para SSD, desfragmentacao para HDD.
+echo  [..] Otimizando disco C: (detectando tipo: SSD ou HDD)...
+for /f "skip=1 tokens=*" %%d in ('wmic diskdrive get MediaType 2^>nul') do (
+    echo %%d | findstr /i "SSD Solid" >nul 2>&1
+    if not errorlevel 1 (
+        defrag C: /L >nul 2>&1
+        echo  [OK] SSD detectado - TRIM executado
+        goto :DEFRAG_FIM
+    )
+)
+defrag C: /U /H >nul 2>&1
+echo  [OK] HDD detectado - Desfragmentacao executada
+:DEFRAG_FIM
 
 echo.
 echo  [OK] === Otimizacao do sistema concluida ===
@@ -339,7 +438,7 @@ echo.
 goto :EOF
 
 :: ============================================================
-:: SERVICOS E STARTUP
+:: SERVICOS E STARTUP (individual)
 :: ============================================================
 :SERVICOS
 cls
@@ -409,7 +508,7 @@ echo.
 goto :EOF
 
 :: ============================================================
-:: REDE E INTERNET
+:: REDE E INTERNET (individual)
 :: ============================================================
 :REDE
 cls
@@ -442,14 +541,14 @@ echo  [..] Limpando cache ARP...
 arp -d * >nul 2>&1
 echo  [OK] Cache ARP limpo
 
-echo  [..] Configurando DNS para Google (8.8.8.8)...
-for /f "tokens=*" %%i in ('netsh interface show interface ^| findstr "Connected"') do (
-    for /f "tokens=4" %%j in ("%%i") do (
-        netsh interface ip set dns "%%j" static 8.8.8.8 >nul 2>&1
-        netsh interface ip add dns "%%j" 8.8.8.8 index=2 >nul 2>&1
-    )
-)
-echo  [OK] DNS configurado (Google 8.8.8.8)
+:: CORRIGIDO: loop anterior pegava tokens errados e nao configurava o DNS
+:: no adaptador correto. Agora usa PowerShell para obter apenas os adaptadores
+:: ativos (Status=Up) e configurar DNS primario e secundario de forma confiavel.
+echo  [..] Configurando DNS para Google (8.8.8.8 / 8.8.4.4)...
+powershell -Command ^
+  "Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | ForEach-Object { Set-DnsClientServerAddress -InterfaceIndex $_.ifIndex -ServerAddresses ('8.8.8.8','8.8.4.4') }" ^
+  >nul 2>&1
+echo  [OK] DNS configurado em todos os adaptadores ativos (8.8.8.8 / 8.8.4.4)
 
 echo  [..] Otimizando auto-ajuste de janela TCP...
 netsh int tcp set global autotuninglevel=normal >nul 2>&1
@@ -483,12 +582,14 @@ echo  === CPU ===
 wmic cpu get name,numberofcores,maxclockspeed /format:list 2>nul | findstr /v "^$"
 echo.
 
-echo  === TOP PROCESSOS (uso de memoria) ===
-tasklist /fo table /nh | sort /r /+64 | head -15 >nul 2>&1
-tasklist /fo csv /nh | sort /r 2>nul | head -10 >nul 2>&1
-wmic process get name,workingsetsize /format:table 2>nul | sort /r /+40 | findstr /v "^$" | head -15
-
+:: CORRIGIDO: removido uso de "head" (comando Unix, inexistente no Windows).
+:: Agora usa PowerShell para listar os 15 processos com maior uso de memoria,
+:: formatado em tabela diretamente no console.
+echo  === TOP 15 PROCESSOS (uso de memoria) ===
+powershell -Command ^
+  "Get-Process | Sort-Object WorkingSet64 -Descending | Select-Object -First 15 | Format-Table -AutoSize Name, @{Name='Memoria(MB)';Expression={[math]::Round($_.WorkingSet64/1MB,1)}}, Id | Out-String -Width 70"
 echo.
+
 echo  ========================================================
 pause
 goto MENU
